@@ -2,14 +2,14 @@
 DDoS Detection & Prevention System - Full Version
 -----------------------------------------------------
 Features:
-- Password protection (pehli baar password set karo, phir har baar login)
-- Auto-lock: 30 second koi activity na ho to automatically lock ho jayega
-- Faster packet processing (BPF filter se sirf IP packets process hote hain)
-- Improved dashboard: graph + top IPs table + protocol breakdown
+- Password protection (set a password on first run, then login every time after)
+- Auto-lock: automatically locks after 30 seconds of inactivity
+- Faster packet processing (BPF filter ensures only IP packets are processed)
+- Improved dashboard: traffic graph + top IPs table + protocol breakdown
 
-Run karne ke liye (Admin/sudo permission zaroori hai):
-    Windows: python detector_final.py
-    Linux/Mac: sudo python3 detector_final.py
+To run (Admin/sudo permission required):
+    Windows: python app.py
+    Linux/Mac: sudo python3 app.py
 """
 
 import time
@@ -34,13 +34,13 @@ from scapy.all import sniff, IP, TCP, UDP, ICMP
 
 
 # ============================================
-# IP INTELLIGENCE (location, ISP, approx distance, approx OS ,which device,VPN\Proxy,Hosting,ASN,etc.)
+# IP INTELLIGENCE (location, ISP, approx distance, approx OS, device type, VPN/Proxy, hosting, ASN, etc.)
 # ============================================
-MY_LOCATION = None   # apni location cache ho jayegi (lat, lon) - ek baar fetch hogi
+MY_LOCATION = None   # Cache for this system's approximate location (lat, lon) - fetched once
 
 
 def get_my_location():
-    """Apna (system ka) approximate location fetch karta hai, ek baar cache ho jata hai"""
+    """Fetches this system's approximate location; result is cached after the first call."""
     global MY_LOCATION
     if MY_LOCATION is not None:
         return MY_LOCATION
@@ -55,7 +55,7 @@ def get_my_location():
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """Do coordinates ke beech ka distance km me nikalta hai"""
+    """Calculates the distance in km between two coordinates."""
     R = 6371  # Earth radius in km
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -65,7 +65,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 
 def bearing_angle(lat1, lon1, lat2, lon2):
-    """Aapki location se target IP ki taraf ka compass angle (degrees) nikalta hai - radar view ke liye"""
+    """Calculates the compass bearing (degrees) from this system's location to the target IP - used for the radar view."""
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dlambda = math.radians(lon2 - lon1)
     x = math.sin(dlambda) * math.cos(phi2)
@@ -75,7 +75,7 @@ def bearing_angle(lat1, lon1, lat2, lon2):
 
 
 def get_hostname(ip_address):
-    """IP se hostname nikalne ki koshish karta hai (reverse DNS lookup)"""
+    """Attempts to resolve a hostname from an IP address (reverse DNS lookup)."""
     try:
         socket.setdefaulttimeout(2)
         host = socket.gethostbyaddr(ip_address)[0]
@@ -86,9 +86,9 @@ def get_hostname(ip_address):
 
 def get_ip_details(ip_address):
     """
-    Kisi IP ki location, ISP, timezone, hostname, network/ASN, aur
-    VPN/Proxy/Hosting/Mobile status nikalta hai.
-    Free ip-api.com service use karta hai (private/local IPs ke liye kaam nahi karega).
+    Retrieves location, ISP, timezone, hostname, network/ASN, and
+    VPN/Proxy/Hosting/Mobile status for a given IP.
+    Uses the free ip-api.com service (will not work for private/local IPs).
     """
     result = {
         "country": "Unknown", "city": "Unknown", "region": "Unknown", "isp": "Unknown",
@@ -98,7 +98,7 @@ def get_ip_details(ip_address):
         "is_hosting": "Unknown", "is_mobile": "Unknown"
     }
 
-    # Private/local IPs (jaise 192.168.x.x, 10.x.x.x) ke liye public location nahi milegi
+    # Private/local IPs (e.g. 192.168.x.x, 10.x.x.x) won't have public location data
     if ip_address.startswith(("192.168.", "10.", "127.")) or ip_address.startswith("172."):
         result["country"] = "Local Network"
         result["city"] = "-"
@@ -130,15 +130,15 @@ def get_ip_details(ip_address):
                     result["distance_km"] = f"{dist:.0f} km"
                     result["bearing"] = bearing_angle(my_loc[0], my_loc[1], data["lat"], data["lon"])
     except Exception:
-        pass  # internet na ho ya API fail ho to "Unknown" hi rahega
+        pass  # No internet or API failure - fields stay "Unknown"
 
     return result
 
 
 def guess_os_from_ttl(ttl):
     """
-    TTL value se OS ka rough andaza (100% accurate nahi hai, sirf approximate hint).
-    Windows ~128, Linux/Android ~64, macOS/iOS/some routers ~64 ya 255
+    Makes a rough guess at the OS based on the TTL value (not 100% accurate, just an approximate hint).
+    Windows ~128, Linux/Android ~64, macOS/iOS/some routers ~64 or 255
     """
     if ttl is None:
         return "Unknown"
@@ -185,27 +185,27 @@ def hash_password(password):
 
 
 def set_new_password(root):
-    """Pehli baar app chalane par password set karwata hai"""
+    """Prompts the user to set a password on first run."""
     while True:
         pwd = simpledialog.askstring("Set Password", "ENTER NEW PASSWORD:", show="*", parent=root)
         if pwd is None:
             root.destroy()
-            raise SystemExit("Password NOT SET, band kar rahe hain.")
+            raise SystemExit("Password not set, shutting down.")
         if len(pwd) < 4:
-            messagebox.showwarning("Warning", "Password REQUIRED FOR MINIMUM FOU CHARACTER.")
+            messagebox.showwarning("Warning", "Password must be at least four characters.")
             continue
-        confirm = simpledialog.askstring("Confirm Password", " RE ENTER PASSWORD:", show="*", parent=root)
+        confirm = simpledialog.askstring("Confirm Password", "RE-ENTER PASSWORD:", show="*", parent=root)
         if pwd == confirm:
             with open(PASSWORD_FILE, "w") as f:
                 f.write(hash_password(pwd))
             messagebox.showinfo("Success", "Password set successfully!")
             return
         else:
-            messagebox.showwarning("Warning", "Password match nahi hua, dobara try karo.")
+            messagebox.showwarning("Warning", "Passwords did not match, please try again.")
 
 
 def verify_password(root):
-    """Login screen - sahi password na ho to baar baar poochta hai"""
+    """Login screen - keeps prompting until the correct password is entered."""
     if not os.path.exists(PASSWORD_FILE):
         set_new_password(root)
         return
@@ -214,14 +214,14 @@ def verify_password(root):
         saved_hash = f.read().strip()
 
     while True:
-        pwd = simpledialog.askstring("Login Required", "Password daalo:", show="*", parent=root)
+        pwd = simpledialog.askstring("Login Required", "Enter password:", show="*", parent=root)
         if pwd is None:
             root.destroy()
-            raise SystemExit("Login cancel ho gaya.")
+            raise SystemExit("Login cancelled.")
         if hash_password(pwd) == saved_hash:
             return
         else:
-            messagebox.showerror("Error", "Galat password, dobara try karo.")
+            messagebox.showerror("Error", "Incorrect password, please try again.")
 
 
 # ============================================
@@ -248,7 +248,7 @@ def setup_database():
 
 
 def log_suspicious_ip(ip_address, request_count, details, approx_os):
-    """Database me likhta hai - agar DB busy/locked ho ya koi aur issue ho, crash nahi karega"""
+    """Writes to the database - if the DB is busy/locked or another issue occurs, it won't crash the app."""
     try:
         conn = sqlite3.connect(DB_NAME, timeout=5)
         cursor = conn.cursor()
@@ -263,22 +263,22 @@ def log_suspicious_ip(ip_address, request_count, details, approx_os):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[Warning] Log save nahi ho payi (ignoring): {e}")
+        print(f"[Warning] Could not save log entry (ignoring): {e}")
 
 
 # ============================================
 # PACKET PROCESSING (background thread)
 # ============================================
 def process_packet(packet, app):
-    """Har packet process karta hai. Poora function try/except me hai taaki
-    kisi ek corrupt/ajeeb packet se poori sniffing thread crash na ho."""
+    """Processes each captured packet. The whole function is wrapped in try/except so that
+    a single corrupt/unusual packet cannot crash the entire sniffing thread."""
     global total_packets, current_second_count
 
     try:
         if IP in packet:
             src_ip = packet[IP].src
 
-            # Protocol pehchano (dashboard breakdown ke liye)
+            # Identify the protocol (for the dashboard breakdown)
             if TCP in packet:
                 proto = "TCP"
             elif UDP in packet:
@@ -315,8 +315,8 @@ def process_packet(packet, app):
                     blocked_ips.add(src_ip)
                     already_flagged.add(src_ip)
 
-            # Lookup (location/ISP) internet call karta hai isliye lock ke BAHAR,
-            # taaki dusre packets process hone me atke na
+            # Lookups (location/ISP) make an internet call, so this stays OUTSIDE the lock
+            # to avoid blocking other packets from being processed.
             if current_count > THRESHOLD and src_ip in blocked_ips and src_ip not in getattr(process_packet, "_logged", set()):
                 if not hasattr(process_packet, "_logged"):
                     process_packet._logged = set()
@@ -328,29 +328,30 @@ def process_packet(packet, app):
                         log_suspicious_ip(src_ip, current_count, details, approx_os)
                         app.add_alert(src_ip, current_count, details, approx_os)
                     except Exception as e:
-                        print(f"[Warning] Alert/lookup me issue (ignoring, sniffing jaari hai): {e}")
+                        print(f"[Warning] Issue during alert/lookup (ignoring, sniffing continues): {e}")
     except Exception as e:
-        # Koi bhi anjaan error aaye packet processing me, poori thread crash nahi hogi
-        print(f"[Warning] Packet process karte waqt error (ignoring): {e}")
+        # Any unexpected error during packet processing is caught here so the
+        # sniffing thread keeps running.
+        print(f"[Warning] Error while processing packet (ignoring): {e}")
 
 
 def start_sniffing(app):
     """
-    Packet capture background thread me chalta hai.
-    Agar kisi wajah se sniff() fail/crash ho jaye (jaise adapter disconnect),
-    to app crash hone ki bajaye khud ko restart kar leta hai.
+    Packet capture runs in a background thread.
+    If sniff() fails/crashes for any reason (e.g. adapter disconnects),
+    the app restarts sniffing instead of crashing.
     """
     while True:
         try:
-            # filter="ip" -> speed improvement: sirf IP packets scapy dega,
-            # baaki (ARP, etc.) drop ho jayenge kernel level pe hi
+            # filter="ip" -> performance improvement: scapy only returns IP packets,
+            # everything else (ARP, etc.) is dropped at the kernel level
             sniff(prn=lambda pkt: process_packet(pkt, app), store=False, filter="ip")
-            break  # agar sniff normally return kare (rare), loop se bahar aa jao
+            break  # if sniff() returns normally (rare), exit the loop
         except PermissionError:
-            print("[Error] Admin/root permissions chahiye packet capture ke liye. Sniffing ruk gayi.")
+            print("[Error] Admin/root permissions are required for packet capture. Sniffing stopped.")
             break
         except Exception as e:
-            print(f"[Warning] Sniffing me error, 3 second me dobara try karenge: {e}")
+            print(f"[Warning] Sniffing error, retrying in 3 seconds: {e}")
             time.sleep(3)
 
 
@@ -424,7 +425,7 @@ class DDoSApp:
         self.tree.heading("count", text="Requests (window)")
         self.tree.pack(fill=tk.BOTH, expand=True)
 
-        # Alerts list (Treeview - ek row per alert, click karke details khulengi)
+        # Alerts list (Treeview - one row per alert, double-click to open details)
         list_frame = tk.Frame(bottom_frame, width=320)
         list_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(10, 0))
 
@@ -439,10 +440,10 @@ class DDoSApp:
         self.alert_tree.pack(fill=tk.BOTH, expand=True)
         self.alert_tree.bind("<Double-1>", self.on_alert_double_click)
 
-        # Har alert row ka full data yahan store hoga (row id -> details dict)
+        # Full data for each alert row is stored here (row id -> details dict)
         self.alert_data_store = {}
 
-        # ---------- Lock overlay (upar sabke, hidden by default) ----------
+        # ---------- Lock overlay (on top of everything, hidden by default) ----------
         self.lock_overlay = tk.Frame(root, bg="black")
 
         self.update_gui()
@@ -454,7 +455,7 @@ class DDoSApp:
 
     def check_idle_timer(self):
         if not self.root.winfo_exists():
-            return  # window band ho chuki hai, ab kuch mat karo
+            return  # window has been closed, nothing more to do
         if not self.locked and (time.time() - self.last_activity) > LOCK_TIMEOUT:
             self.lock_screen()
         if self.root.winfo_exists():
@@ -468,9 +469,9 @@ class DDoSApp:
         self.root.update()
 
         try:
-            verify_password(self.root)  # user password daalega yahan
+            verify_password(self.root)  # user enters password here
         except SystemExit:
-            return  # window band ho gayi login ke dauraan, aage kuch mat karo
+            return  # window was closed during login, nothing more to do
 
         if not self.root.winfo_exists():
             return
@@ -489,7 +490,7 @@ class DDoSApp:
 
         def insert_row():
             row_id = self.alert_tree.insert("", 0, values=(ip, timestamp))
-            # Is row ki poori detail store kar do, taaki double-click pe nikaal sakein
+            # Store the full details for this row so they can be retrieved on double-click
             self.alert_data_store[row_id] = {
                 "ip": ip,
                 "count": count,
@@ -510,13 +511,13 @@ class DDoSApp:
                 "is_mobile": details.get("is_mobile", "Unknown"),
                 "approx_os": approx_os,
             }
-            # Naya alert aane par row ko thodi der ke liye highlight/pulse karo (visual feedback)
+            # Briefly highlight/pulse the row when a new alert comes in (visual feedback)
             self.pulse_row(row_id, 0)
 
         self.root.after(0, insert_row)
 
     def pulse_row(self, row_id, step):
-        """Naye alert row ko 3 baar red<->normal blink karke dhyan khinchta hai"""
+        """Blinks a new alert row red<->normal a few times to draw attention to it."""
         colors = ["#ffcccc", "white"]
         if step >= 6 or row_id not in self.alert_tree.get_children():
             return
@@ -528,7 +529,7 @@ class DDoSApp:
         self.root.after(200, lambda: self.pulse_row(row_id, step + 1))
 
     def on_alert_double_click(self, event):
-        """Jab kisi alert row pe double-click ho, ek achhi detail window kholta hai"""
+        """Opens a detail window when an alert row is double-clicked."""
         selected = self.alert_tree.selection()
         if not selected:
             return
@@ -539,14 +540,14 @@ class DDoSApp:
         self.show_detail_window(data)
 
     def show_detail_window(self, data):
-        """App-jaisi styled detail window - animated radar + poori info dikhati hai"""
+        """Displays a styled detail window with an animated radar view and full alert info."""
         win = tk.Toplevel(self.root)
         win.title(f"Threat Details - {data['ip']}")
         win.geometry("500x960")
         win.configure(bg="#1e1e2f")
         win.resizable(False, False)
 
-        # ---- Fade-in animation (window dheere dheere visible hoti hai) ----
+        # ---- Fade-in animation (window gradually becomes visible) ----
         try:
             win.attributes("-alpha", 0.0)
 
@@ -556,9 +557,9 @@ class DDoSApp:
                     win.after(15, lambda: fade(step + 0.08))
             fade()
         except tk.TclError:
-            pass  # kuch systems pe alpha transparency support nahi hoti, tab normal khulega
+            pass  # some systems don't support alpha transparency, window opens normally
 
-        # ---- Header (jaise app ka top banner) ----
+        # ---- Header (styled like an app's top banner) ----
         header = tk.Frame(win, bg="#e74c3c", height=70)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
@@ -591,16 +592,16 @@ class DDoSApp:
             radar_ax.set_xticklabels(["N", "", "E", "", "S", "", "W", ""], color="#9a9ab0")
             radar_ax.grid(color="#3a3a55")
 
-            # Center = aap (green dot)
+            # Center = this system (green dot)
             radar_ax.plot(0, 0, "o", color="#4caf50", markersize=10)
 
             if angle_rad is not None:
-                # Attacker ki direction/distance - pulsing red dot
+                # Attacker's direction/distance - pulsing red dot
                 radar_ax.plot([angle_rad], [0.75], "o", color="#ff1744", markersize=8 + pulse_radius)
                 radar_ax.plot([0, angle_rad], [0, 0.75], color="#ff5252", linewidth=1.5, linestyle="--")
             radar_canvas.draw()
 
-        # Pulsing animation loop - jab tak window khuli hai chalta rahega
+        # Pulsing animation loop - keeps running while the window is open
         def animate_radar(step=0):
             if not win.winfo_exists():
                 return
@@ -657,10 +658,10 @@ class DDoSApp:
                 webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
             else:
                 messagebox.showinfo("Map Not Available",
-                                     "Is IP (local network ya lookup fail) ki exact coordinates nahi mili.")
+                                     "Exact coordinates are not available for this IP (local network or lookup failed).")
 
         def refresh_location():
-            """Dobara IP lookup karke updated location laata hai (background thread me)"""
+            """Re-runs the IP lookup in the background to fetch updated location data."""
             def worker():
                 new_details = get_ip_details(data["ip"])
                 data.update({
@@ -673,7 +674,7 @@ class DDoSApp:
                     "is_vpn_or_proxy": new_details.get("is_vpn_or_proxy", data.get("is_vpn_or_proxy")),
                 })
                 if win.winfo_exists():
-                    win.after(0, lambda: messagebox.showinfo("Refreshed", "Location dobara check ho gayi. Window band karke dobara kholo updated info dekhne ke liye."))
+                    win.after(0, lambda: messagebox.showinfo("Refreshed", "Location has been rechecked. Close and reopen this window to see the updated info."))
             threading.Thread(target=worker, daemon=True).start()
 
         tk.Button(btn_row, text="🗺 View on Map", command=open_map, bg="#2196F3", fg="white",
@@ -690,7 +691,7 @@ class DDoSApp:
         global current_second_count
 
         if not self.root.winfo_exists():
-            return  # window band ho chuki hai
+            return  # window has been closed
 
         with lock:
             packets_this_second = current_second_count
@@ -733,12 +734,11 @@ class DDoSApp:
 # ============================================
 def handle_gui_exception(exc, val, tb):
     """
-    Tkinter me kisi bhi button click/timer callback ke andar agar
-    anjaan error aaye, to poori app crash hone ki bajaye sirf
-    terminal me warning print hogi aur app chalti rahegi.
+    If an unexpected error occurs inside a Tkinter button click/timer callback,
+    this prints a warning to the terminal instead of crashing the whole app.
     """
     import traceback
-    print("[Warning] Ek GUI error aayi, ignore karke aage badh rahe hain:")
+    print("[Warning] A GUI error occurred, ignoring and continuing:")
     traceback.print_exception(exc, val, tb)
 
 
@@ -747,14 +747,14 @@ if __name__ == "__main__":
 
     root = tk.Tk()
     root.report_callback_exception = handle_gui_exception  # crash-proofing
-    root.withdraw()  # login/setup poora hone tak main window chhupao
+    root.withdraw()  # hide the main window until login/setup is complete
 
     try:
-        verify_password(root)  # pehli baar password set karwayega, warna login lega
+        verify_password(root)  # prompts to set a password on first run, otherwise logs in
     except SystemExit:
-        raise  # user ne khud cancel kiya, ye normal exit hai
+        raise  # user cancelled - this is a normal exit
 
-    root.deiconify()  # ab main window dikhao
+    root.deiconify()  # show the main window
     app = DDoSApp(root)
 
     sniff_thread = threading.Thread(target=start_sniffing, args=(app,), daemon=True)
